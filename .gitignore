@@ -7,3 +7,5 @@ scistarter_cfg.yml
 test.ext
 test_df.csv
 work_space.ipynb
+log_*
+.idea
