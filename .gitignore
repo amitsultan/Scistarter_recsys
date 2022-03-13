@@ -1,0 +1,9 @@
+.coverage
+htmlcov
+__pycache__
+.ipynb_checkpoints
+opportunities.csv
+scistarter_cfg.yml
+test.ext
+test_df.csv
+work_space.ipynb
