@@ -1,8 +1,20 @@
 import requests
 import yaml
+import json
 import pandas as pd
 import os.path
 import numpy as np
+from AWSHandler import IPHandler
+from geopy.distance import geodesic
+
+
+def get_coordinates(coords_string):
+    try:
+        coords_string = coords_string.replace("'", "\"")
+        coords = json.loads(coords_string)['coordinates']
+        return tuple([coords[1], coords[0]])
+    except Exception as e:
+        return None
 
 
 class ScistarterAPI:
@@ -27,6 +39,7 @@ class ScistarterAPI:
         self.scistarter_dict_keys = cfg['dictionary_keys']  # This holds the response json keys for genetric use
         self.opportunities = None
         self.opportunities_df = None
+        self.ip_handler = IPHandler()
     
     def send_request(self, url, success_msg=None, failed_msg=None):
         """ Generic method for sending API requests.
@@ -112,6 +125,11 @@ class ScistarterAPI:
         Returns:
             object: List of opportunities.
         """
+        if fields is None:
+            fields = ['location_point',
+                      'start_datetimes',
+                      'has_end',
+                      'end_datetimes']
 
         if self.opportunities is None:  # Make sure opportunities general info is loaded
             response = self.get_opportunities()
@@ -133,10 +151,45 @@ class ScistarterAPI:
                     missing_uids_info.append(self.get_opportunity_info(missing_uid, fields))
                 uids_missing_info_df = pd.DataFrame(missing_uids_info)
                 missing_df = pd.concat([missing_uids_partial_df.reset_index(drop=True), uids_missing_info_df.reset_index(drop=True)], axis=1)
-                self.opportunities_df = pd.concat([self.opportunities_df, missing_df])
+                try:
+                    self.opportunities_df = pd.concat([self.opportunities_df, missing_df])
+                except Exception as e:
+                    print('Failed to merge DataFrame, this can be a cause of differentiate in DataFrame fields')
         else:
             self.opportunities_df = pd.DataFrame(self.opportunities)
             additional_info = self.opportunities_df['uid'].swifter.apply(lambda uid: self.get_opportunity_info(uid, fields))
             additional_info_df = pd.DataFrame(additional_info.tolist())
             self.opportunities_df = pd.concat([self.opportunities_df, additional_info_df], axis=1)
+        self.opportunities_df['cords'] = self.opportunities_df['location_point'].apply(lambda point: get_coordinates(point))
         self.opportunities_df.to_csv(path, index=False)
+
+    def recommend_user(self, ip_addr, N, max_distance=None):
+        """ Method Recommend opportunities for a user based on their IP location.
+
+        Args:
+            ip_addr(string): IP Address of the user.
+            N(int): Number of recommendations
+            max_distance(int): Max distance for the recommendations, will not recommend anything
+                                further than max_distance. if None, will return the closest-N.
+        Returns:
+            object: List of most closest opportunities ID's, opportunities must not be "Ended".
+        """
+        uid_recommendations = []
+        if self.opportunities_df is None:
+            print('No opportunities DataFrame was found, loading opportunities please wait...')
+            self.load_opportunities_df("opportunities.csv")
+            print('Opportunities loaded, created a file name opportunities.csv')
+        ip_info = self.ip_handler.lookup_ip(ip_addr)
+        if ip_info is None:
+            return uid_recommendations
+        location = ip_info['loc'].split(',')
+        location_point = (location[0], location[1])
+        still_active_opportunities = self.opportunities_df[self.opportunities_df['has_end'].eq(False)]
+        possible_opportunities = still_active_opportunities['cords'].\
+            apply(lambda cord: geodesic(cord, location_point).km)
+        if max_distance is not None:
+            possible_opportunities = possible_opportunities[possible_opportunities <= max_distance]
+        possible_opportunities.sort_values(inplace=True, ascending=True)
+        possible_opportunities = possible_opportunities[:N]
+        uid_recommendations = self.opportunities_df.iloc[possible_opportunities.index]['uid'].values
+        return uid_recommendations

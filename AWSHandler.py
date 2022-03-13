@@ -45,20 +45,18 @@ class AWSHandler:
 class IPHandler:
 
     def __init__(self):
-        self.request_url = 'https://geolocation-db.com/jsonp/'
+        self.request_url = 'http://ipinfo.io/'
+        with open("scistarter_cfg.yml", "r") as ymlfile:
+            cfg = yaml.load(ymlfile, Loader=yaml.FullLoader)
+            self.API_TOKEN = cfg['IPInfo']['token']
 
     def lookup_ip(self, ip_addr):
         try:
-            response = requests.get(f'{self.request_url}{ip_addr}')
+            response = requests.get(f'{self.request_url}{ip_addr}?token={self.API_TOKEN}')
             result = response.content.decode()
-            # Clean the returned string so it just contains the dictionary data for the IP address
-            result = result.split("(")[1].strip(")")
-            # Convert this data into a dictionary
-            result  = json.loads(result)
+            result = json.loads(result)
+            if 'status' in result.keys() and result['status'] == 404:
+                return None
             return result
         except Exception as e:
             raise Exception(f'Failed to send or read IP API request, error: {e}')
-
-
-ip_handler = IPHandler()
-ip_handler.lookup_ip('132.72.67.237')
